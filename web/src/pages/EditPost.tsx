@@ -2,15 +2,16 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2, ShieldCheck } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { fetchPostBySlug, fetchTags, updatePost } from '../api/posts'
 import { getFileUrl, pb } from '../lib/pocketbase'
-import { ensureSlug, localOffsetString, nowLocalInput, toIsoWithOffset } from '../lib/utils'
+import { localOffsetString, nowLocalInput, toIsoWithOffset } from '../lib/utils'
 import { useAuth } from '../providers/AuthProvider'
 import type { PostFormInput } from '../types'
 
 const EditPost = () => {
   const { slug } = useParams()
+  const location = useLocation()
   const navigate = useNavigate()
   const { user } = useAuth()
   const queryClient = useQueryClient()
@@ -24,9 +25,12 @@ const EditPost = () => {
   >([])
   const [showAttachments, setShowAttachments] = useState(true)
   const [isRemoving, setIsRemoving] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const [publishedTz, setPublishedTz] = useState(localOffsetString())
   const contentRef = useRef<HTMLTextAreaElement | null>(null)
+  const attachmentsInputRef = useRef<HTMLInputElement | null>(null)
   const contentRegister = form.register('content', { required: true })
+  const attachmentsRegister = form.register('attachments')
 
   const { data: tags } = useQuery({
     queryKey: ['tags'],
@@ -79,6 +83,11 @@ const EditPost = () => {
     }
   }, [form, post])
 
+  const buildErrorText = (err: unknown) => {
+    const e = err as { message?: string; response?: { message?: string } }
+    return e?.message || e?.response?.message || '保存失败，请稍后再试'
+  }
+
   const { mutateAsync, isPending } = useMutation({
     mutationFn: (values: PostFormInput) => {
       if (!post) throw new Error('未找到文章')
@@ -95,8 +104,30 @@ const EditPost = () => {
       setFeedback({ type: 'success', text: '已更新' })
       navigate(`/post/${res.slug}`)
     },
-    onError: (err: any) => {
-      const msg = err?.message || err?.response?.message || '保存失败，请检查必填项或 slug 唯一性。'
+    onError: (err: unknown) => {
+      const msg = buildErrorText(err)
+      setFeedback({ type: 'error', text: msg })
+    },
+  })
+
+  const backTo = (location.state as { backTo?: string } | undefined)?.backTo || '/posts'
+
+  const { mutateAsync: deletePost, isPending: isDeleting } = useMutation({
+    mutationFn: async () => {
+      if (!post) throw new Error('未找到文章')
+      return pb.collection('posts').delete(post.id)
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['posts'] })
+      queryClient.invalidateQueries({ queryKey: ['posts-page'] })
+      queryClient.invalidateQueries({ queryKey: ['my-posts'] })
+      queryClient.invalidateQueries({ queryKey: ['post', slug] })
+      queryClient.invalidateQueries({ queryKey: ['post-edit', slug] })
+      navigate(backTo || '/dashboard')
+      window.scrollTo({ top: 0, behavior: 'instant' })
+    },
+    onError: (err: unknown) => {
+      const msg = buildErrorText(err) || '删除失败，请稍后再试'
       setFeedback({ type: 'error', text: msg })
     },
   })
@@ -118,44 +149,61 @@ const EditPost = () => {
             setCoverPreview(getFileUrl(res, res.cover, '640x360'))
             setFeedback({ type: 'success', text: '封面已上传，可直接使用。' })
           })
-          .catch((err: any) => setFeedback({ type: 'error', text: err?.message || '封面上传失败' }))
+          .catch((err: unknown) =>
+            setFeedback({ type: 'error', text: buildErrorText(err) || '封面上传失败' }),
+          )
       }
     }
   }, [coverField, post?.id])
 
   const attachmentsField = form.watch('attachments')
   useEffect(() => {
-    if (attachmentsField && attachmentsField.length && post?.id) {
-      const files = Array.from(attachmentsField)
-      const over = files.find((f) => f.size > 8 * 1024 * 1024)
-      if (over) {
-        setFeedback({ type: 'error', text: '插图单个文件不能超过 8MB' })
-        return
-      }
-      const fd = new FormData()
-      post.attachments?.forEach((name) => fd.append('attachments', name))
-      files.forEach((file) => fd.append('attachments', file))
-      pb.collection('posts')
-        .update(post.id, fd)
-        .then((res) => {
-          setAttachmentLinks(
-            res.attachments?.map((file: string) => {
-              const url = getFileUrl(res, file)
-              return {
-                name: file,
-                url,
-                imgTag: `<img src="${url}" alt="${res.title || ''}" />`,
-                thumb: getFileUrl(res, file, '320x'),
-              }
-            }) ?? [],
-          )
-          setFeedback({ type: 'success', text: '插图已上传，可复制引用链接' })
-        })
-        .catch((err: any) =>
-          setFeedback({ type: 'error', text: err?.message || '插图上传失败' }),
-        )
+    if (!attachmentsField || !attachmentsField.length || !post?.id) return
+
+    const files = Array.from(attachmentsField)
+    const maxSize = 8 * 1024 * 1024
+    const allowedTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
+    const oversize = files.find((f) => f.size > maxSize)
+    if (oversize) {
+      setFeedback({ type: 'error', text: '插图单个文件不能超过 8MB' })
+      return
     }
-  }, [attachmentsField, post?.attachments, post?.id])
+    const invalidType = files.find((f) => !allowedTypes.includes(f.type))
+    if (invalidType) {
+      setFeedback({ type: 'error', text: '仅支持 jpg、png、webp、gif 图片格式' })
+      return
+    }
+
+    const fd = new FormData()
+    // keep already uploaded attachments based on current list, not the initial post snapshot
+    attachmentLinks.forEach((item) => fd.append('attachments', item.name))
+    files.forEach((file) => fd.append('attachments', file))
+
+    pb.collection('posts')
+      .update(post.id, fd)
+      .then((res) => {
+        setAttachmentLinks(
+          res.attachments?.map((file: string) => {
+            const url = getFileUrl(res, file)
+            return {
+              name: file,
+              url,
+              imgTag: `<img src="${url}" alt="${res.title || ''}" />`,
+              thumb: getFileUrl(res, file, '320x'),
+            }
+          }) ?? [],
+        )
+        setFeedback({ type: 'success', text: '插图已上传，可复制引用链接' })
+        // Reset field to avoid resubmitting the same FileList on form submit
+        form.resetField('attachments')
+        if (attachmentsInputRef.current) {
+          attachmentsInputRef.current.value = ''
+        }
+      })
+      .catch((err: unknown) =>
+        setFeedback({ type: 'error', text: buildErrorText(err) || '插图上传失败' }),
+      )
+  }, [attachmentLinks, attachmentsField, form, post?.id])
 
   const handleCopy = async (text: string) => {
     try {
@@ -170,8 +218,9 @@ const EditPost = () => {
         document.body.removeChild(tmp)
       }
       setFeedback({ type: 'success', text: '已复制到剪贴板' })
-    } catch (err: any) {
-      setFeedback({ type: 'error', text: err?.message || '复制失败，请手动复制' })
+    } catch (err: unknown) {
+      const msg = buildErrorText(err) || '复制失败，请手动复制'
+      setFeedback({ type: 'error', text: msg })
     }
   }
 
@@ -207,12 +256,11 @@ const EditPost = () => {
   }
 
   const onSubmit = async (values: PostFormInput) => {
-    const ensuredSlug = ensureSlug(values.slug || values.title || '')
-    form.setValue('slug', ensuredSlug)
+    if (!post) return
     const iso = toIsoWithOffset(values.publishedAt || nowLocalInput(publishedTz), publishedTz)
     await mutateAsync({
       ...values,
-      slug: ensuredSlug,
+      slug: post.slug,
       showAttachments,
       publishedAt: iso,
       publishedTz,
@@ -224,7 +272,12 @@ const EditPost = () => {
     setIsRemoving(true)
     const keep = attachmentLinks.filter((item) => item.name !== name).map((item) => item.name)
     const fd = new FormData()
-    keep.forEach((n) => fd.append('attachments', n))
+    if (keep.length) {
+      keep.forEach((n) => fd.append('attachments', n))
+    } else {
+      // Explicitly clear file field when no attachments remain
+      fd.append('attachments', '')
+    }
     try {
       const res = await pb.collection('posts').update(post.id, fd)
       setAttachmentLinks(
@@ -239,8 +292,8 @@ const EditPost = () => {
         }) ?? [],
       )
       setFeedback({ type: 'success', text: '已删除附件' })
-    } catch (err: any) {
-      setFeedback({ type: 'error', text: err?.message || '删除失败' })
+    } catch (err: unknown) {
+      setFeedback({ type: 'error', text: buildErrorText(err) || '删除失败' })
     } finally {
       setIsRemoving(false)
     }
@@ -303,13 +356,10 @@ const EditPost = () => {
           Slug
           <input
             placeholder="url-slug"
-            {...form.register('slug', {
-              required: 'slug 必填',
-              minLength: { value: 3, message: '至少 3 个字符' },
-              maxLength: { value: 120, message: '最多 120 个字符' },
-              pattern: { value: /^[a-z0-9-]+$/, message: '仅限小写字母、数字和短横线' },
-              setValueAs: (v) => ensureSlug(String(v || '')),
-            })}
+            {...form.register('slug')}
+            readOnly
+            aria-readonly="true"
+            title="slug 创建后不可修改"
           />
         </label>
         <label className="full">
@@ -411,7 +461,16 @@ const EditPost = () => {
         </label>
         <label className="full">
           插图（可多选）
-          <input type="file" accept="image/*" multiple {...form.register('attachments')} />
+          <input
+            type="file"
+            accept="image/*"
+            multiple
+            {...attachmentsRegister}
+            ref={(el) => {
+              attachmentsRegister.ref(el)
+              attachmentsInputRef.current = el
+            }}
+          />
           <p className="muted">
             单个不超过 8MB。上传后下方可复制 URL 或 &lt;img&gt; 标签，直接粘贴到正文。
           </p>
@@ -495,8 +554,39 @@ const EditPost = () => {
             {isPending ? <Loader2 className="spin" size={16} /> : <ShieldCheck size={16} />}
             {isPending ? '保存中' : '更新文章'}
           </button>
+          <button
+            className="danger-btn"
+            type="button"
+            disabled={isDeleting}
+            onClick={() => setConfirmDelete(true)}
+          >
+            {isDeleting ? <Loader2 className="spin" size={16} /> : null}
+            删除文章
+          </button>
         </div>
       </form>
+      {confirmDelete ? (
+        <div className="confirm-backdrop">
+          <div className="confirm-dialog">
+            <h3>是否删除</h3>
+            <p className="muted">删除后将无法恢复，确定要删除这篇文章吗？</p>
+            <div className="confirm-actions">
+              <button className="ghost-btn" type="button" onClick={() => setConfirmDelete(false)}>
+                否
+              </button>
+              <button
+                className="danger-btn"
+                type="button"
+                disabled={isDeleting}
+                onClick={() => deletePost()}
+              >
+                {isDeleting ? <Loader2 className="spin" size={16} /> : null}
+                是
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   )
 }

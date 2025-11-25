@@ -61,7 +61,9 @@ const PostDetail = () => {
           ) : null}
           {user?.id === post.author ? (
             <div className="pill">
-              <Link to={`/post/${post.slug}/edit`}>编辑此文</Link>
+              <Link to={`/post/${post.slug}/edit`} state={{ backTo: '/posts' }}>
+                编辑此文
+              </Link>
             </div>
           ) : null}
         </div>

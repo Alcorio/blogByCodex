@@ -1,3 +1,4 @@
+import { pinyin } from 'pinyin-pro'
 import { format, parseISO } from 'date-fns'
 
 export const slugify = (value: string) =>
@@ -9,10 +10,18 @@ export const slugify = (value: string) =>
     .replace(/--+/g, '-')
     .replace(/^-+|-+$/g, '')
 
+const slugifyWithPinyin = (value: string) => {
+  const hasHan = /[\u4e00-\u9fff]/.test(value)
+  if (!hasHan) return slugify(value)
+  // 将中文转为无声调拼音，用短横线分隔，然后再做 slug 化处理
+  const py = pinyin(value, { toneType: 'none', type: 'array', nonZh: 'spaced' }).join(' ')
+  return slugify(py)
+}
+
 export const ensureSlug = (value: string) => {
   const maxLen = 120
   // 基础 slug
-  let slug = slugify(value)
+  let slug = slugifyWithPinyin(value)
   // 留出随机尾巴的位置
   const tail = Math.random().toString(36).slice(2, 6)
   if (slug.length > maxLen - tail.length - 1) {

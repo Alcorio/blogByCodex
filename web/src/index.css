@@ -187,7 +187,8 @@ button {
 
 .primary-btn,
 .ghost-btn,
-.text-btn {
+.text-btn,
+.danger-btn {
   border: none;
   border-radius: 12px;
   padding: 0.7rem 1.1rem;
@@ -216,6 +217,46 @@ button {
 
 .ghost-btn:hover {
   background: rgba(255, 255, 255, 0.09);
+}
+
+.danger-btn {
+  background: linear-gradient(120deg, rgba(244, 63, 94, 0.85), rgba(244, 63, 94, 0.65));
+  color: #fff;
+  border: 1px solid rgba(244, 63, 94, 0.45);
+}
+
+.danger-btn:hover {
+  transform: translateY(-1px);
+}
+
+.confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: grid;
+  place-items: center;
+  z-index: 30;
+  padding: 1rem;
+}
+
+.confirm-dialog {
+  width: min(420px, 100%);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 1.25rem;
+  box-shadow: var(--shadow);
+}
+
+.confirm-dialog h3 {
+  margin: 0 0 0.4rem;
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1rem;
 }
 
 .text-btn {
@@ -749,6 +790,7 @@ label {
 .form-actions {
   display: flex;
   justify-content: flex-start;
+  gap: 0.6rem;
   margin-top: 0.5rem;
 }
 
