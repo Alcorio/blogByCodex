@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Image as ImageIcon, Loader2, ShieldCheck } from 'lucide-react'
+import { Loader2, ShieldCheck } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { createPost, fetchTags } from '../api/posts'
@@ -9,8 +9,9 @@ import {
   nowLocalInput,
   toIsoWithOffset,
 } from '../lib/utils'
+import { getFileUrl, pb } from '../lib/pocketbase'
 import { useAuth } from '../providers/AuthProvider'
-import type { PostFormInput } from '../types'
+import type { PostFormInput, PostRecord } from '../types'
 
 const defaultTz = localOffsetString()
 const defaultValues: PostFormInput = {
@@ -37,8 +38,24 @@ const Dashboard = () => {
   )
   const [coverPreview, setCoverPreview] = useState<string | null>(null)
   const [attachmentsPreview, setAttachmentsPreview] = useState<string[]>([])
+  const [attachmentLinks, setAttachmentLinks] = useState<
+    { name: string; url: string; imgTag: string; thumb?: string }[]
+  >([])
+  const [createdPost, setCreatedPost] = useState<PostRecord | null>(null)
+  const [isRemoving, setIsRemoving] = useState(false)
+  const [slugEdited, setSlugEdited] = useState(false)
   const contentRef = useRef<HTMLTextAreaElement | null>(null)
   const contentRegister = form.register('content', { required: true })
+  const attachmentsRegister = form.register('attachments')
+  const attachmentsInputRef = useRef<HTMLInputElement | null>(null)
+  const slugRegister = form.register('slug', {
+    required: 'slug 必填',
+    minLength: { value: 3, message: '至少 3 个字符' },
+    maxLength: { value: 120, message: '最多 120 个字符' },
+    pattern: { value: /^[a-z0-9-]+$/, message: '仅限小写字母、数字和短横线' },
+    setValueAs: (v) => ensureSlug(String(v || '')),
+    onChange: () => setSlugEdited(true),
+  })
 
   const { data: tags } = useQuery({
     queryKey: ['tags'],
@@ -51,17 +68,28 @@ const Dashboard = () => {
         ...values,
         readingMinutes: values.readingMinutes ? Number(values.readingMinutes) : undefined,
       }),
-    onSuccess: () => {
+    onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['posts'] })
       queryClient.invalidateQueries({ queryKey: ['posts-page'] })
       queryClient.invalidateQueries({ queryKey: ['my-posts'] })
       setFeedback({ type: 'success', text: '保存成功，可继续编辑或退出。' })
+      setCreatedPost(res)
+      setAttachmentLinks(
+        res.attachments?.map((file: string) => {
+          const url = getFileUrl(res, file)
+          return {
+            name: file,
+            url,
+            imgTag: `<img src="${url}" alt="${res.title || ''}" />`,
+            thumb: getFileUrl(res, file, '320x'),
+          }
+        }) ?? [],
+      )
     },
-    onError: (err: any) => {
-      const msg =
-        err?.message ||
-        err?.response?.message ||
-        '保存失败，请检查必填项、slug 唯一性或上传的文件大小/格式。'
+    onError: (err: unknown) => {
+      const message = (err as { message?: string; response?: { message?: string } })?.message
+      const responseMsg = (err as { response?: { message?: string } })?.response?.message
+      const msg = message || responseMsg || '保存失败，请检查必填项、slug 唯一性或上传的文件大小/格式。'
       setFeedback({ type: 'error', text: msg })
     },
   })
@@ -75,12 +103,15 @@ const Dashboard = () => {
 
   useEffect(() => {
     const subscription = form.watch((value, { name }) => {
-      if (name === 'title' && value.title && !form.getValues('slug')) {
+      if (name === 'title' && value.title && !slugEdited) {
         form.setValue('slug', ensureSlug(value.title))
+      }
+      if (name === 'slug' && !value.slug) {
+        setSlugEdited(false)
       }
     })
     return () => subscription.unsubscribe()
-  }, [form])
+  }, [form, slugEdited])
 
   // Cover preview + size guard
   const coverField = form.watch('cover')
@@ -97,16 +128,64 @@ const Dashboard = () => {
   // Attachments preview + size guard
   const attachmentsField = form.watch('attachments')
   useEffect(() => {
-    if (attachmentsField && attachmentsField.length) {
-      const files = Array.from(attachmentsField)
-      const over = files.find((f) => f.size > 8 * 1024 * 1024)
-      if (over) {
-        setFeedback({ type: 'error', text: '插图单个文件不能超过 8MB' })
-        return
-      }
+    if (!attachmentsField || !attachmentsField.length) {
+      setAttachmentsPreview([])
+      return
+    }
+
+    const files = Array.from(attachmentsField)
+    const maxSize = 8 * 1024 * 1024
+    const allowedTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
+    const oversize = files.find((f) => f.size > maxSize)
+    if (oversize) {
+      setFeedback({ type: 'error', text: '插图单个文件不能超过 8MB' })
+      return
+    }
+    const invalidType = files.find((f) => !allowedTypes.includes(f.type))
+    if (invalidType) {
+      setFeedback({ type: 'error', text: '仅支持 jpg、png、webp、gif 图片格式' })
+      return
+    }
+
+    // If the post already exists, upload immediately (so links are available)
+    if (createdPost?.id) {
+      const fd = new FormData()
+      attachmentLinks.forEach((item) => fd.append('attachments', item.name))
+      files.forEach((file) => fd.append('attachments', file))
+
+      pb.collection('posts')
+        .update<PostRecord>(createdPost.id, fd)
+        .then((res) => {
+          setCreatedPost(res)
+          setAttachmentLinks(
+            res.attachments?.map((file: string) => {
+              const url = getFileUrl(res, file)
+              return {
+                name: file,
+                url,
+                imgTag: `<img src="${url}" alt="${res.title || ''}" />`,
+                thumb: getFileUrl(res, file, '320x'),
+              }
+            }) ?? [],
+          )
+          setFeedback({ type: 'success', text: '插图已上传，可复制引用链接' })
+          form.resetField('attachments')
+          if (attachmentsInputRef.current) {
+            attachmentsInputRef.current.value = ''
+          }
+        })
+        .catch((err: unknown) =>
+          setFeedback({
+            type: 'error',
+            text:
+              (err as { message?: string })?.message || (err as { response?: { message?: string } })?.response?.message || '插图上传失败',
+          }),
+        )
+    } else {
+      // For unsaved posts, still show previews so users know selection
       setAttachmentsPreview(files.map((f) => URL.createObjectURL(f)))
     }
-  }, [attachmentsField])
+  }, [attachmentLinks, attachmentsField, createdPost?.id, form])
 
   const publishedAtValue = form.watch('publishedAt')
   const tzValue = form.watch('publishedTz')
@@ -153,6 +232,58 @@ const Dashboard = () => {
     form.setValue('content', `${value}\n${imgTag}`)
   }
 
+  const handleCopy = async (text: string) => {
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text)
+      } else {
+        const tmp = document.createElement('textarea')
+        tmp.value = text
+        document.body.appendChild(tmp)
+        tmp.select()
+        document.execCommand('copy')
+        document.body.removeChild(tmp)
+      }
+      setFeedback({ type: 'success', text: '已复制到剪贴板' })
+    } catch (err: unknown) {
+      const msg = (err as { message?: string })?.message || '复制失败，请手动复制'
+      setFeedback({ type: 'error', text: msg })
+    }
+  }
+
+  const handleRemoveAttachment = async (name: string) => {
+    if (!createdPost?.id) return
+    setIsRemoving(true)
+    const keep = attachmentLinks.filter((item) => item.name !== name).map((item) => item.name)
+    const fd = new FormData()
+    if (keep.length) {
+      keep.forEach((n) => fd.append('attachments', n))
+    } else {
+      fd.append('attachments', '')
+    }
+    try {
+      const res = await pb.collection<PostRecord>('posts').update(createdPost.id, fd)
+      setCreatedPost(res)
+      setAttachmentLinks(
+        res.attachments?.map((file: string) => {
+          const url = getFileUrl(res, file)
+          return {
+            name: file,
+            url,
+            imgTag: `<img src="${url}" alt="${res.title || ''}" />`,
+            thumb: getFileUrl(res, file, '320x'),
+          }
+        }) ?? [],
+      )
+      setFeedback({ type: 'success', text: '已删除附件' })
+    } catch (err: unknown) {
+      const msg = (err as { message?: string })?.message || '删除失败'
+      setFeedback({ type: 'error', text: msg })
+    } finally {
+      setIsRemoving(false)
+    }
+  }
+
   if (!user) {
     return (
       <div className="container center" id="dashboard">
@@ -189,16 +320,7 @@ const Dashboard = () => {
         </label>
         <label>
           Slug
-          <input
-            placeholder="url-slug"
-            {...form.register('slug', {
-              required: 'slug 必填',
-              minLength: { value: 3, message: '至少 3 个字符' },
-              maxLength: { value: 120, message: '最多 120 个字符' },
-              pattern: { value: /^[a-z0-9-]+$/, message: '仅限小写字母、数字和短横线' },
-              setValueAs: (v) => ensureSlug(String(v || '')),
-            })}
-          />
+          <input placeholder="url-slug" {...slugRegister} />
           {form.formState.errors.slug ? (
             <span className="error">{form.formState.errors.slug.message as string}</span>
           ) : null}
@@ -307,7 +429,16 @@ const Dashboard = () => {
         </label>
         <label className="full">
           插图（可多选）
-          <input type="file" accept="image/*" multiple {...form.register('attachments')} />
+          <input
+            type="file"
+            accept="image/*"
+            multiple
+            {...attachmentsRegister}
+            ref={(el) => {
+              attachmentsRegister.ref(el)
+              attachmentsInputRef.current = el
+            }}
+          />
           <p className="muted">
             单个不超过 8MB。正文中引用：保存后在文章详情复制图片 URL 粘贴到编辑器。
           </p>
@@ -318,7 +449,44 @@ const Dashboard = () => {
             />
             保存后在正文下方显示附件模块（含下载）
           </label>
-          {attachmentsPreview.length ? (
+          {createdPost && attachmentLinks.length ? (
+            <div className="attachment-list">
+              {attachmentLinks.map((item, idx) => (
+                <div key={idx} className="attachment-item row">
+                  <div className="thumb small">
+                    {item.thumb ? <img src={item.thumb} alt={item.name} /> : null}
+                  </div>
+                  <div className="attachment-meta">
+                    <div className="muted">{item.name}</div>
+                    <div className="attachment-actions">
+                      <input
+                        readOnly
+                        value={item.url}
+                        onFocus={(e) => e.target.select()}
+                        aria-label="图片URL"
+                      />
+                      <button
+                        type="button"
+                        className="ghost-btn copy-btn"
+                        onClick={() => handleCopy(item.url)}
+                      >
+                        复制
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost-btn copy-btn"
+                        disabled={isRemoving}
+                        onClick={() => handleRemoveAttachment(item.name)}
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
+          {!createdPost && attachmentsPreview.length ? (
             <div className="thumb-row">
               {attachmentsPreview.map((src, idx) => (
                 <div key={idx} className="thumb">

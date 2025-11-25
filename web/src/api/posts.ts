@@ -2,6 +2,10 @@ import { pb } from '../lib/pocketbase'
 import { estimateReadingMinutes } from '../lib/utils'
 import type { PostFormInput, PostRecord, TagRecord } from '../types'
 
+type PocketbaseErrorData = Record<string, { message?: string }>
+type PocketbaseErrorResponse = { message?: string; data?: PocketbaseErrorData }
+type PocketbaseError = { message?: string; response?: PocketbaseErrorResponse }
+
 const toFormData = (payload: PostFormInput) => {
   const authorId = pb.authStore.model?.id
   if (!authorId) {
@@ -46,14 +50,15 @@ const toFormData = (payload: PostFormInput) => {
 const stripShowAttachments = (formData: FormData) => {
   const fd = new FormData()
   formData.forEach((v, k) => {
-    if (k !== 'showAttachments') fd.append(k, v as any)
+    if (k !== 'showAttachments') fd.append(k, v)
   })
   return fd
 }
 
 export const fetchTags = async () => {
   return pb.collection<TagRecord>('tags').getFullList({
-    sort: 'name',
+    // Keep the tag order consistent with creation time in the database
+    sort: 'created',
   })
 }
 
@@ -70,8 +75,9 @@ export const fetchPosts = async (tagSlug?: string) => {
       filter: filterBase,
       expand: 'tags,author',
     })
-    .catch((err: any) => {
-      console.error('fetchPosts failed', err?.response ?? err)
+    .catch((err: unknown) => {
+      const pbErr = err as PocketbaseError
+      console.error('fetchPosts failed', pbErr.response ?? pbErr)
       throw err
     })
 
@@ -99,19 +105,19 @@ export const fetchMyPosts = async () => {
   return result.items
 }
 
-const buildErrorMessage = (err: any) => {
-  const fieldErrors = err?.response?.data
-    ? Object.entries(err.response.data)
-        .map(([key, val]: any) => `${key}: ${val?.message ?? '校验失败'}`)
+const buildErrorMessage = (err: unknown): string => {
+  const pbErr = err as PocketbaseError
+  const fieldErrors = pbErr.response?.data
+    ? Object.entries(pbErr.response.data)
+        .map(([key, val]) => `${key}: ${val?.message ?? '校验失败'}`)
         .join('; ')
     : ''
-  const dataMsg = err?.response?.data ? JSON.stringify(err.response.data) : ''
+  const dataMsg = pbErr.response?.data ? JSON.stringify(pbErr.response.data) : ''
   return (
-    err?.response?.message ||
-    err?.response?.data?.message ||
+    pbErr.response?.message ||
     fieldErrors ||
     dataMsg ||
-    err?.message ||
+    pbErr.message ||
     '操作失败'
   )
 }
@@ -120,7 +126,7 @@ export const createPost = async (payload: PostFormInput) => {
   const formData = toFormData(payload)
   try {
     return await pb.collection<PostRecord>('posts').create(formData)
-  } catch (err: any) {
+  } catch (err: unknown) {
     try {
       const fdNoShow = stripShowAttachments(formData)
       return await pb.collection<PostRecord>('posts').create(fdNoShow)
@@ -128,7 +134,8 @@ export const createPost = async (payload: PostFormInput) => {
       // ignore and fall through
     }
     const msg = buildErrorMessage(err)
-    console.error('createPost error', err?.response ?? err)
+    const pbErr = err as PocketbaseError
+    console.error('createPost error', pbErr.response ?? pbErr)
     throw new Error(msg)
   }
 }
@@ -137,7 +144,7 @@ export const updatePost = async (id: string, payload: PostFormInput) => {
   const formData = toFormData(payload)
   try {
     return await pb.collection<PostRecord>('posts').update(id, formData)
-  } catch (err: any) {
+  } catch (err: unknown) {
     try {
       const fdNoShow = stripShowAttachments(formData)
       return await pb.collection<PostRecord>('posts').update(id, fdNoShow)
@@ -145,7 +152,8 @@ export const updatePost = async (id: string, payload: PostFormInput) => {
       // ignore and fall through
     }
     const msg = buildErrorMessage(err)
-    console.error('updatePost error', err?.response ?? err)
+    const pbErr = err as PocketbaseError
+    console.error('updatePost error', pbErr.response ?? pbErr)
     throw new Error(msg)
   }
 }

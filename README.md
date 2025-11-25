@@ -1,6 +1,6 @@
-# PocketBase Blog（devtest）
+# PocketBase Blog
 
-基于 PocketBase + React/Vite 的轻量博客。包含文章、标签、评论表结构，带后台写作台与种子数据脚本。
+基于 PocketBase + React/Vite 的轻量博客。完全由OpenAI Codex实现。包含文章、标签、评论表结构，带后台写作台与种子数据脚本。
 
 ## 目录结构
 - `pocketbase_bin/`：已下载的 PocketBase 0.22.4 Windows 可执行文件。
@@ -11,7 +11,8 @@
 ## 快速开始（本地）
 1) **启动 PocketBase 并迁移**
 ```powershell
-cd C:\tools\pocketbase\devtest
+cd C:\pocketbase
+# 初次运行时请删除已有的pg_data目录
 .\pocketbase_bin\pocketbase.exe migrate up --dir pb_data
 .\pocketbase_bin\pocketbase.exe serve --http 0.0.0.0:8090 --dir pb_data
 ```
@@ -24,8 +25,9 @@ cd C:\tools\pocketbase\devtest
 3) **前端启动**
 ```powershell
 cd web
-copy .env.example .env   # 如需自定义后端地址可修改 VITE_PB_URL
-npm install               # 已执行过，可重复确保依赖完整
+# 如需自定义后端地址可自建并修改 VITE_PB_URL
+copy .env.example .env  
+npm install               
 npm run dev -- --host
 ```
 浏览器访问 http://127.0.0.1:5173
@@ -66,3 +68,6 @@ npm run test:run
 ## 其他
 - 环境变量：前端读取 `VITE_PB_URL`（默认 http://127.0.0.1:8090）。
 - PocketBase 版本建议与客户端 SDK 一致（本项目使用 0.22.x 系列）。
+
+## 页面示例
+![](./pic1.png)

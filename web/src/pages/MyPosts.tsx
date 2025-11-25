@@ -41,7 +41,11 @@ const MyPosts = () => {
               <div key={post.id} className="card">
                 <PostCard post={post} />
                 <div className="card-actions">
-                  <Link className="text-btn" to={`/post/${post.slug}/edit`}>
+                  <Link
+                    className="text-btn"
+                    to={`/post/${post.slug}/edit`}
+                    state={{ backTo: '/my-posts' }}
+                  >
                     <Pencil size={16} /> 编辑
                   </Link>
                 </div>
