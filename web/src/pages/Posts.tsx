@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { Loader2, Search } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { fetchPosts, fetchTags } from '../api/posts'
 import { pb } from '../lib/pocketbase'
 import PostCard from '../components/PostCard'
@@ -12,6 +12,8 @@ const Posts = () => {
   const [sortOrder, setSortOrder] = useState<'newest' | 'oldest'>('newest')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+  const gridRef = useRef<HTMLDivElement | null>(null)
+  const [gridMinHeight, setGridMinHeight] = useState<number>(260)
 
   const { data: tags } = useQuery({
     queryKey: ['tags'],
@@ -54,6 +56,15 @@ const Posts = () => {
       })
     return result
   }, [keyword, posts, sortOrder, dateFrom, dateTo])
+
+  useLayoutEffect(() => {
+    // Capture a reasonable baseline height so empty results don't yank the page layout.
+    if (!gridRef.current || gridMinHeight > 260) return
+    const rect = gridRef.current.getBoundingClientRect()
+    const viewportCap = typeof window !== 'undefined' ? window.innerHeight * 0.7 : rect.height
+    const clamped = Math.max(260, Math.min(rect.height, viewportCap))
+    setGridMinHeight(clamped)
+  }, [gridMinHeight, posts])
 
   return (
     <section className="container stack" style={{ paddingTop: '2rem', paddingBottom: '3rem' }}>
@@ -131,7 +142,11 @@ const Posts = () => {
           <Loader2 className="spin" />
         </div>
       ) : (
-        <div className="post-grid">
+        <div
+          ref={gridRef}
+          className="post-grid"
+          style={{ minHeight: `${gridMinHeight}px` }}
+        >
           {filtered?.length ? (
             filtered.map((post) => <PostCard key={post.id} post={post} />)
           ) : (

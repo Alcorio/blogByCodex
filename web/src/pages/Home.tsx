@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { Loader2, Search } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { fetchPosts, fetchTags } from '../api/posts'
 import { pb } from '../lib/pocketbase'
 import Hero from '../components/Hero'
@@ -22,6 +22,8 @@ const Home = () => {
   })
 
   const [keyword, setKeyword] = useState('')
+  const gridRef = useRef<HTMLDivElement | null>(null)
+  const [gridMinHeight, setGridMinHeight] = useState<number>(260)
   const filtered = useMemo(() => {
     if (!posts) return []
     if (!keyword.trim()) return posts
@@ -32,6 +34,14 @@ const Home = () => {
         (p.content ?? '').toLowerCase().includes(keyword.toLowerCase()),
     )
   }, [keyword, posts])
+
+  useLayoutEffect(() => {
+    if (!gridRef.current || gridMinHeight > 260) return
+    const rect = gridRef.current.getBoundingClientRect()
+    const viewportCap = typeof window !== 'undefined' ? window.innerHeight * 0.7 : rect.height
+    const clamped = Math.max(260, Math.min(rect.height, viewportCap))
+    setGridMinHeight(clamped)
+  }, [gridMinHeight, posts])
 
   return (
     <>
@@ -78,7 +88,11 @@ const Home = () => {
             <Loader2 className="spin" />
           </div>
         ) : (
-          <div className="post-grid">
+          <div
+            ref={gridRef}
+            className="post-grid"
+            style={{ minHeight: `${gridMinHeight}px` }}
+          >
             {filtered?.length ? (
               filtered.map((post) => <PostCard key={post.id} post={post} />)
             ) : (
