@@ -28,9 +28,9 @@ cd web
 # 如需自定义后端地址可自建并修改 VITE_PB_URL
 copy .env.example .env  
 npm install               
-npm run dev -- --host
+npm run dev
 ```
-浏览器访问 http://127.0.0.1:5173
+浏览器访问 http://127.0.0.1:5173 或者 http://<本地ip>:5173
 
 4) **导入示例数据（可选）**
 确保 PocketBase 服务已启动且管理员账号与下方环境变量一致：
