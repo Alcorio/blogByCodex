@@ -4,7 +4,15 @@ import type { FormEvent } from 'react'
 import { useState } from 'react'
 import { formatDate } from '../lib/utils'
 import { pb } from '../lib/pocketbase'
-import { useAuth } from '../providers/AuthProvider'
+import { useAuth } from '../providers/auth-context'
+
+type AccountMutationError = {
+  message?: string
+  response?: {
+    message?: string
+    data?: Record<string, { message?: string }>
+  }
+}
 
 const Account = () => {
   const { user, login } = useAuth()
@@ -29,11 +37,11 @@ const Account = () => {
 
       return { message: '密码已更新' }
     },
-    onSuccess: (res: any) => setFeedback(res?.message || '已更新'),
-    onError: (err: any) => {
+    onSuccess: (res: { message: string }) => setFeedback(res.message || '已更新'),
+    onError: (err: AccountMutationError) => {
       const fieldErrors = err?.response?.data
         ? Object.entries(err.response.data)
-            .map(([key, val]: any) => `${key}: ${val?.message ?? '校验失败'}`)
+            .map(([key, val]) => `${key}: ${val?.message ?? '校验失败'}`)
             .join('; ')
         : ''
       const msg = err?.response?.message || err?.message || fieldErrors || '更新失败'

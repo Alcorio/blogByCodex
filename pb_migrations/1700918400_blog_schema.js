@@ -78,7 +78,7 @@ migrate(
           options: {
             maxSelect: 1,
             maxSize: 5242880,
-            mimeTypes: ["image/jpeg", "image/png", "image/webp"],
+            mimeTypes: ["image/jpeg", "image/png", "image/webp", "image/gif"],
             thumbs: ["128x128", "640x360", "1280x720"],
           },
         },

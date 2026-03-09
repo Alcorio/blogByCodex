@@ -1,18 +1,27 @@
 import { Clock3, MoveRight } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { getFileUrl } from '../lib/pocketbase'
+import { getFileUrl, isGifFile } from '../lib/pocketbase'
 import { formatDate } from '../lib/utils'
 import type { PostRecord } from '../types'
 import TagPill from './TagPill'
 
 interface Props {
   post: PostRecord
+  href?: string
 }
 
-const PostCard = ({ post }: Props) => {
+const PostCard = ({ post, href }: Props) => {
   const coverUrl =
-    getFileUrl(post, post.cover, '640x360') ||
-    getFileUrl(post, post.attachments?.[0], '640x360')
+    (post.cover
+      ? getFileUrl(post, post.cover, isGifFile(post.cover) ? undefined : '640x360')
+      : '') ||
+    (post.attachments?.[0]
+      ? getFileUrl(
+          post,
+          post.attachments[0],
+          isGifFile(post.attachments[0]) ? undefined : '640x360',
+        )
+      : '')
 
   return (
     <article className="post-card">
@@ -39,7 +48,7 @@ const PostCard = ({ post }: Props) => {
           ))}
         </div>
         <div className="post-card__footer">
-          <Link className="text-btn" to={`/post/${post.slug}`}>
+          <Link className="text-btn" to={href || `/post/${post.slug}`}>
             阅读更多 <MoveRight size={18} />
           </Link>
           {post.expand?.author ? (

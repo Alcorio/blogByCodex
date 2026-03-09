@@ -4,7 +4,7 @@ import type { FormEvent } from 'react'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { pb } from '../lib/pocketbase'
-import { useAuth } from '../providers/AuthProvider'
+import { useAuth } from '../providers/auth-context'
 
 const Signup = () => {
   const navigate = useNavigate()

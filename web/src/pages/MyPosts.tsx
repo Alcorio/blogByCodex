@@ -3,7 +3,7 @@ import { Loader2, Pencil } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { fetchMyPosts } from '../api/posts'
 import PostCard from '../components/PostCard'
-import { useAuth } from '../providers/AuthProvider'
+import { useAuth } from '../providers/auth-context'
 
 const MyPosts = () => {
   const { user } = useAuth()

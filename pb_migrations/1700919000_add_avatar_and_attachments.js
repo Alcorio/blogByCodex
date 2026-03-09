@@ -38,7 +38,7 @@ migrate(
           maxSelect: 6,
           maxSize: 8388608,
           mimeTypes: ["image/png", "image/jpeg", "image/webp"],
-          thumbs: ["320x", "640x", "1280x"],
+          thumbs: ["320x0", "640x0", "1280x0"],
         },
       }),
     );

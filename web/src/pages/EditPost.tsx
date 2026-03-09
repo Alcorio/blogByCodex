@@ -1,13 +1,33 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2, ShieldCheck } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { useForm } from 'react-hook-form'
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { useForm, useWatch } from 'react-hook-form'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { fetchPostBySlug, fetchTags, updatePost } from '../api/posts'
-import { getFileUrl, pb } from '../lib/pocketbase'
+import {
+  buildPortableImageTag,
+  getFileUrl,
+  pb,
+  removePortableImageFromContent,
+} from '../lib/pocketbase'
 import { localOffsetString, nowLocalInput, toIsoWithOffset } from '../lib/utils'
-import { useAuth } from '../providers/AuthProvider'
-import type { PostFormInput } from '../types'
+import { useAuth } from '../providers/auth-context'
+import type { PostFormInput, PostRecord } from '../types'
+import PostContentEditor, {
+  type EditorMode,
+  type PostContentEditorHandle,
+} from '../components/PostContentEditor'
+
+const buildAttachmentLinks = (record: PostRecord | null | undefined) =>
+  record?.attachments?.map((file: string) => {
+    const url = getFileUrl(record, file)
+    return {
+      name: file,
+      url,
+      imgTag: buildPortableImageTag(record, file, { alt: record.title || '' }),
+      thumb: getFileUrl(record, file, '320x0'),
+    }
+  }) ?? []
 
 const EditPost = () => {
   const { slug } = useParams()
@@ -27,10 +47,19 @@ const EditPost = () => {
   const [isRemoving, setIsRemoving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [publishedTz, setPublishedTz] = useState(localOffsetString())
-  const contentRef = useRef<HTMLTextAreaElement | null>(null)
+  const contentEditorRef = useRef<PostContentEditorHandle | null>(null)
   const attachmentsInputRef = useRef<HTMLInputElement | null>(null)
-  const contentRegister = form.register('content', { required: true })
   const attachmentsRegister = form.register('attachments')
+  const [editorMode, setEditorMode] = useState<EditorMode>('source')
+  const contentValue = useWatch({
+    control: form.control,
+    name: 'content',
+    defaultValue: '',
+  })
+
+  useEffect(() => {
+    form.register('content', { required: true })
+  }, [form])
 
   const { data: tags } = useQuery({
     queryKey: ['tags'],
@@ -66,26 +95,22 @@ const EditPost = () => {
       })
       setPublishedTz(tz)
       setShowAttachments(Boolean(post.showAttachments))
-      if (post.cover) setCoverPreview(getFileUrl(post, post.cover, '640x360'))
-      if (post.attachments?.length) {
-        setAttachmentLinks(
-          post.attachments.map((file: string) => {
-            const url = getFileUrl(post, file)
-            return {
-              name: file,
-              url,
-              imgTag: `<img src="${url}" alt="${post.title || ''}" />`,
-              thumb: getFileUrl(post, file, '320x'),
-            }
-          }),
-        )
-      }
+      setCoverPreview(post.cover ? getFileUrl(post, post.cover, '640x360') : null)
+      setAttachmentLinks(buildAttachmentLinks(post))
     }
   }, [form, post])
 
   const buildErrorText = (err: unknown) => {
-    const e = err as { message?: string; response?: { message?: string } }
-    return e?.message || e?.response?.message || '保存失败，请稍后再试'
+    const e = err as {
+      message?: string
+      response?: { message?: string; data?: Record<string, { message?: string }> }
+    }
+    const fieldErrors = e?.response?.data
+      ? Object.entries(e.response.data)
+          .map(([key, val]) => `${key}: ${val?.message ?? '校验失败'}`)
+          .join('；')
+      : ''
+    return fieldErrors || e?.response?.message || e?.message || '保存失败，请稍后再试'
   }
 
   const { mutateAsync, isPending } = useMutation({
@@ -101,8 +126,9 @@ const EditPost = () => {
       queryClient.invalidateQueries({ queryKey: ['posts-page'] })
       queryClient.invalidateQueries({ queryKey: ['my-posts'] })
       queryClient.invalidateQueries({ queryKey: ['post', slug] })
+      queryClient.invalidateQueries({ queryKey: ['post-edit', slug] })
       setFeedback({ type: 'success', text: '已更新' })
-      navigate(`/post/${res.slug}`)
+      navigate(`/post/${res.slug}`, { state: { scrollTarget: 'post-meta' } })
     },
     onError: (err: unknown) => {
       const msg = buildErrorText(err)
@@ -144,9 +170,13 @@ const EditPost = () => {
         const fd = new FormData()
         fd.append('cover', coverField[0])
         pb.collection('posts')
-          .update(post.id, fd)
+          .update<PostRecord>(post.id, fd)
           .then((res) => {
             setCoverPreview(getFileUrl(res, res.cover, '640x360'))
+            queryClient.setQueryData(['post-edit', slug], res)
+            queryClient.setQueryData(['post', slug], res)
+            queryClient.invalidateQueries({ queryKey: ['posts'] })
+            form.resetField('cover')
             setFeedback({ type: 'success', text: '封面已上传，可直接使用。' })
           })
           .catch((err: unknown) =>
@@ -154,7 +184,7 @@ const EditPost = () => {
           )
       }
     }
-  }, [coverField, post?.id])
+  }, [coverField, form, post?.id, queryClient, slug])
 
   const attachmentsField = form.watch('attachments')
   useEffect(() => {
@@ -175,24 +205,15 @@ const EditPost = () => {
     }
 
     const fd = new FormData()
-    // keep already uploaded attachments based on current list, not the initial post snapshot
-    attachmentLinks.forEach((item) => fd.append('attachments', item.name))
-    files.forEach((file) => fd.append('attachments', file))
+    files.forEach((file) => fd.append('attachments+', file))
 
     pb.collection('posts')
-      .update(post.id, fd)
+      .update<PostRecord>(post.id, fd)
       .then((res) => {
-        setAttachmentLinks(
-          res.attachments?.map((file: string) => {
-            const url = getFileUrl(res, file)
-            return {
-              name: file,
-              url,
-              imgTag: `<img src="${url}" alt="${res.title || ''}" />`,
-              thumb: getFileUrl(res, file, '320x'),
-            }
-          }) ?? [],
-        )
+        queryClient.setQueryData(['post-edit', slug], res)
+        queryClient.setQueryData(['post', slug], res)
+        queryClient.invalidateQueries({ queryKey: ['posts'] })
+        setAttachmentLinks(buildAttachmentLinks(res))
         setFeedback({ type: 'success', text: '插图已上传，可复制引用链接' })
         // Reset field to avoid resubmitting the same FileList on form submit
         form.resetField('attachments')
@@ -203,7 +224,7 @@ const EditPost = () => {
       .catch((err: unknown) =>
         setFeedback({ type: 'error', text: buildErrorText(err) || '插图上传失败' }),
       )
-  }, [attachmentLinks, attachmentsField, form, post?.id])
+  }, [attachmentsField, form, post?.id, queryClient, slug])
 
   const handleCopy = async (text: string) => {
     try {
@@ -231,28 +252,14 @@ const EditPost = () => {
     }
   }, [feedback])
 
-  const applyMarkup = (wrapStart: string, wrapEnd: string) => {
-    const el = contentRef.current
-    if (!el) return
-    const start = el.selectionStart
-    const end = el.selectionEnd
-    const value = form.getValues('content') || ''
-    const before = value.slice(0, start)
-    const selected = value.slice(start, end)
-    const after = value.slice(end)
-    form.setValue('content', `${before}${wrapStart}${selected || ''}${wrapEnd}${after}`)
-  }
-
-  const insertImage = () => {
-    const url = prompt('图片地址')
-    if (!url) return
+  const insertAttachmentImage = (item: { name: string; imgTag: string }) => {
     const width = prompt('可选：宽度（px），留空自适应') || ''
-    const style = width
-      ? ` style="width:${width}px;max-width:100%;height:auto;"`
-      : ' style="max-width:100%;height:auto;"'
-    const imgTag = `<img src="${url}"${style} />`
-    const value = form.getValues('content') || ''
-    form.setValue('content', `${value}\n${imgTag}`)
+    const tag =
+      post && item.name
+        ? buildPortableImageTag(post, item.name, { alt: post.title || '', width })
+        : item.imgTag
+    contentEditorRef.current?.insertHtml(tag)
+    setFeedback({ type: 'success', text: '图片标签已插入正文' })
   }
 
   const onSubmit = async (values: PostFormInput) => {
@@ -270,27 +277,24 @@ const EditPost = () => {
   const handleRemoveAttachment = async (name: string) => {
     if (!post?.id) return
     setIsRemoving(true)
-    const keep = attachmentLinks.filter((item) => item.name !== name).map((item) => item.name)
     const fd = new FormData()
-    if (keep.length) {
-      keep.forEach((n) => fd.append('attachments', n))
-    } else {
-      // Explicitly clear file field when no attachments remain
-      fd.append('attachments', '')
-    }
+    fd.append('attachments-', name)
     try {
-      const res = await pb.collection('posts').update(post.id, fd)
-      setAttachmentLinks(
-        res.attachments?.map((file: string) => {
-          const url = getFileUrl(res, file)
-          return {
-            name: file,
-            url,
-            imgTag: `<img src="${url}" alt="${res.title || ''}" />`,
-            thumb: getFileUrl(res, file, '320x'),
-          }
-        }) ?? [],
-      )
+      const nextContent = removePortableImageFromContent(form.getValues('content') || '', name)
+      fd.append('content', nextContent)
+
+      const res = await pb.collection<PostRecord>('posts').update(post.id, fd)
+      const nextPost = {
+        ...post,
+        ...res,
+        content: nextContent,
+        attachments: (post.attachments ?? []).filter((file: string) => file !== name),
+      }
+      form.setValue('content', nextContent)
+      queryClient.setQueryData(['post-edit', slug], nextPost)
+      queryClient.setQueryData(['post', slug], nextPost)
+      queryClient.invalidateQueries({ queryKey: ['posts'] })
+      setAttachmentLinks(buildAttachmentLinks(nextPost))
       setFeedback({ type: 'success', text: '已删除附件' })
     } catch (err: unknown) {
       setFeedback({ type: 'error', text: buildErrorText(err) || '删除失败' })
@@ -350,7 +354,17 @@ const EditPost = () => {
       <form className="card form-grid" onSubmit={form.handleSubmit(onSubmit)}>
         <label>
           标题
-          <input placeholder="标题" {...form.register('title', { required: '标题必填' })} />
+          <input
+            placeholder="标题"
+            {...form.register('title', {
+              required: '标题必填',
+              minLength: { value: 4, message: '标题至少 4 个字符' },
+              maxLength: { value: 140, message: '标题最多 140 个字符' },
+            })}
+          />
+          {form.formState.errors.title ? (
+            <span className="error">{form.formState.errors.title.message as string}</span>
+          ) : null}
         </label>
         <label>
           Slug
@@ -366,46 +380,14 @@ const EditPost = () => {
           摘要
           <textarea rows={3} {...form.register('excerpt')} />
         </label>
-        <label className="full">
-          正文 (支持 HTML)
-          <div className="editor-toolbar">
-            <button type="button" className="ghost-btn" onClick={() => applyMarkup('<strong>', '</strong>')}>
-              加粗
-            </button>
-            <button type="button" className="ghost-btn" onClick={() => applyMarkup('<em>', '</em>')}>
-              斜体
-            </button>
-            <button type="button" className="ghost-btn" onClick={() => applyMarkup('<u>', '</u>')}>
-              下划线
-            </button>
-            <button type="button" className="ghost-btn" onClick={() => applyMarkup('<h2>', '</h2>')}>
-              H2
-            </button>
-            <button type="button" className="ghost-btn" onClick={() => applyMarkup('<h3>', '</h3>')}>
-              H3
-            </button>
-            <button type="button" className="ghost-btn" onClick={() => applyMarkup('<blockquote>', '</blockquote>')}>
-              引用
-            </button>
-            <button type="button" className="ghost-btn" onClick={() => applyMarkup('<span style="font-size:18px;">', '</span>')}>
-              大号字
-            </button>
-            <button type="button" className="ghost-btn" onClick={() => applyMarkup('<span style="font-size:12px;">', '</span>')}>
-              小号字
-            </button>
-            <button type="button" className="ghost-btn" onClick={insertImage}>
-              插入图片
-            </button>
-          </div>
-          <textarea
-            rows={10}
-            {...contentRegister}
-            ref={(el) => {
-              contentRef.current = el
-              contentRegister.ref(el)
-            }}
-          />
-        </label>
+        <PostContentEditor
+          ref={contentEditorRef}
+          value={contentValue || ''}
+          onChange={(next) => form.setValue('content', next, { shouldDirty: true })}
+          mode={editorMode}
+          onModeChange={setEditorMode}
+          imageAlt={post?.title || form.getValues('title') || ''}
+        />
         <label>
           状态
           <select {...form.register('status')}>
@@ -511,6 +493,13 @@ const EditPost = () => {
                       <button
                         type="button"
                         className="ghost-btn copy-btn"
+                        onClick={() => insertAttachmentImage(item)}
+                      >
+                        插入正文
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost-btn copy-btn"
                         disabled={isRemoving}
                         onClick={() => handleRemoveAttachment(item.name)}
                       >
@@ -572,7 +561,7 @@ const EditPost = () => {
             <p className="muted">删除后将无法恢复，确定要删除这篇文章吗？</p>
             <div className="confirm-actions">
               <button className="ghost-btn" type="button" onClick={() => setConfirmDelete(false)}>
-                否
+                取消
               </button>
               <button
                 className="danger-btn"
@@ -581,7 +570,7 @@ const EditPost = () => {
                 onClick={() => deletePost()}
               >
                 {isDeleting ? <Loader2 className="spin" size={16} /> : null}
-                是
+                删除
               </button>
             </div>
           </div>

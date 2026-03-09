@@ -5,13 +5,14 @@ import { useState } from 'react'
 import { createComment, fetchComments } from '../api/comments'
 import { getFileUrl } from '../lib/pocketbase'
 import { formatDate } from '../lib/utils'
-import { useAuth } from '../providers/AuthProvider'
+import { useAuth } from '../providers/auth-context'
 
 interface Props {
   postId: string
+  hideLoggedOutPrompt?: boolean
 }
 
-const CommentSection = ({ postId }: Props) => {
+const CommentSection = ({ postId, hideLoggedOutPrompt = false }: Props) => {
   const queryClient = useQueryClient()
   const { user } = useAuth()
   const [content, setContent] = useState('')
@@ -87,7 +88,7 @@ const CommentSection = ({ postId }: Props) => {
 
       <form className="comment-form" onSubmit={handleSubmit}>
         {!user ? (
-          <div className="alert">登录后可以发表你的想法。</div>
+          hideLoggedOutPrompt ? null : <div className="alert">登录后可以发表你的想法。</div>
         ) : (
           <>
             <label className="muted" htmlFor="comment">

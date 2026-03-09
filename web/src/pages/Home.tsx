@@ -1,14 +1,20 @@
 import { useQuery } from '@tanstack/react-query'
 import { Loader2, Search } from 'lucide-react'
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { fetchPosts, fetchTags } from '../api/posts'
 import { pb } from '../lib/pocketbase'
+import { stripHtmlToText } from '../lib/utils'
 import Hero from '../components/Hero'
 import PostCard from '../components/PostCard'
+import SearchParamInput from '../components/SearchParamInput'
 import TagPill from '../components/TagPill'
 
 const Home = () => {
-  const [tag, setTag] = useState<string | undefined>()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tag = searchParams.get('tag') || undefined
+  const keyword = searchParams.get('q') || ''
+  const authorKeyword = searchParams.get('author') || ''
 
   const { data: tags } = useQuery({
     queryKey: ['tags'],
@@ -21,19 +27,29 @@ const Home = () => {
     queryFn: () => fetchPosts(tag),
   })
 
-  const [keyword, setKeyword] = useState('')
   const gridRef = useRef<HTMLDivElement | null>(null)
   const [gridMinHeight, setGridMinHeight] = useState<number>(260)
   const filtered = useMemo(() => {
     if (!posts) return []
-    if (!keyword.trim()) return posts
-    return posts.filter(
-      (p) =>
-        p.title.toLowerCase().includes(keyword.toLowerCase()) ||
-        (p.excerpt ?? '').toLowerCase().includes(keyword.toLowerCase()) ||
-        (p.content ?? '').toLowerCase().includes(keyword.toLowerCase()),
-    )
-  }, [keyword, posts])
+    const lower = keyword.toLowerCase()
+    const lowerAuthor = authorKeyword.toLowerCase()
+
+    return posts.filter((p) => {
+      const matchesKeyword =
+        !lower ||
+        p.title.toLowerCase().includes(lower) ||
+        (p.excerpt ?? '').toLowerCase().includes(lower) ||
+        stripHtmlToText(p.content).toLowerCase().includes(lower)
+
+      const matchesAuthor =
+        !lowerAuthor ||
+        `${p.expand?.author?.username ?? ''} ${p.expand?.author?.email ?? ''}`
+          .toLowerCase()
+          .includes(lowerAuthor)
+
+      return matchesKeyword && matchesAuthor
+    })
+  }, [authorKeyword, keyword, posts])
 
   useLayoutEffect(() => {
     if (!gridRef.current || gridMinHeight > 260) return
@@ -42,6 +58,27 @@ const Home = () => {
     const clamped = Math.max(260, Math.min(rect.height, viewportCap))
     setGridMinHeight(clamped)
   }, [gridMinHeight, posts])
+
+  const updateFilters = (next: { tag?: string; keyword?: string; authorKeyword?: string }) => {
+    const params = new URLSearchParams(searchParams)
+
+    if (next.tag !== undefined) {
+      if (next.tag) params.set('tag', next.tag)
+      else params.delete('tag')
+    }
+
+    if (next.keyword !== undefined) {
+      if (next.keyword.trim()) params.set('q', next.keyword)
+      else params.delete('q')
+    }
+
+    if (next.authorKeyword !== undefined) {
+      if (next.authorKeyword.trim()) params.set('author', next.authorKeyword)
+      else params.delete('author')
+    }
+
+    setSearchParams(params, { replace: true })
+  }
 
   return (
     <>
@@ -58,7 +95,7 @@ const Home = () => {
           <button
             type="button"
             className={!tag ? 'tag-pill active' : 'tag-pill'}
-            onClick={() => setTag(undefined)}
+            onClick={() => updateFilters({ tag: '' })}
           >
             全部
           </button>
@@ -67,16 +104,25 @@ const Home = () => {
               key={t.id}
               tag={t}
               active={t.slug === tag}
-              onClick={(slug) => setTag(slug)}
+              onClick={(slug) => updateFilters({ tag: slug })}
             />
           ))}
           <div className="search-box">
             <Search size={16} />
-            <input
-              type="search"
+            <SearchParamInput
+              key={keyword}
               placeholder="搜索标题或内容"
-              value={keyword}
-              onChange={(e) => setKeyword(e.target.value)}
+              initialValue={keyword}
+              onCommit={(next) => updateFilters({ keyword: next })}
+            />
+          </div>
+          <div className="search-box">
+            <Search size={16} />
+            <SearchParamInput
+              key={authorKeyword}
+              placeholder="搜索作者"
+              initialValue={authorKeyword}
+              onCommit={(next) => updateFilters({ authorKeyword: next })}
             />
           </div>
         </div>

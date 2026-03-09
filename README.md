@@ -1,73 +1,162 @@
 # PocketBase Blog
 
-基于 PocketBase + React/Vite 的轻量博客。完全由OpenAI Codex实现。包含文章、标签、评论表结构，带后台写作台与种子数据脚本。
+基于 PocketBase `0.36.6`、React `19`、Vite `7` 的博客项目。  
+本项目完全由 OpenAI Codex 开发。
 
-## 目录结构
-- `pocketbase_bin/`：已下载的 PocketBase 0.22.4 Windows 可执行文件。
-- `pb_migrations/`：数据库迁移（posts、tags、comments）。
-- `web/`：前端（React + React Query + React Router + Vitest）。
-- `scripts/`：预留后台脚本目录（当前主要使用 web/scripts/seed.mjs）。
+## 功能
 
-## 快速开始（本地）
-1) **启动 PocketBase 并迁移**
-```powershell
-cd C:\pocketbase
-# 初次运行时请删除已有的pg_data目录
-.\pocketbase_bin\pocketbase.exe migrate up --dir pb_data
-.\pocketbase_bin\pocketbase.exe serve --http 0.0.0.0:8090 --dir pb_data
+- 博客首页、文章列表、文章详情
+- 标签筛选、内容搜索、作者搜索
+- 评论区
+- 后台写作与编辑
+- 封面、附件、GIF 图片支持
+- 双正文编辑模式
+  - HTML 源码模式
+  - 富文本模式
+- 用户头像与个人资料
+- 公开分享页 
+
+## 首次初始化
+
+首次运行一个全新环境时，`pb_migrations/` 里的迁移文件是必须执行的。  
+当前仓库共有 7 条迁移，分别负责：
+
+- 创建 `posts`、`tags`、`comments`
+- 给用户增加 `profileAvatar`
+- 给文章增加 `attachments`
+- 增加 `showAttachments`
+- 增加 `publishedTz`
+- 调整用户可见规则
+- 允许 GIF 附件
+- 创建 `shares` 分享页集合
+
+如果是第一次启动，请先清空 `pb_data/`，再执行 migration。
+
+如果是迁移已有项目，请保留原 `pb_data/`，不要清空，也通常不需要再手动跑 migration。
+
+## 环境变量
+
+前端主要使用两个环境变量：
+
+```env
+VITE_PB_URL=http://127.0.0.1:8090
+VITE_APP_URL=http://127.0.0.1:5173
 ```
 
-2) **创建管理员账户**（首次需要，用于 PocketBase 控制台，不用于前台登录）
+- `VITE_PB_URL`
+  PocketBase 地址
+- `VITE_APP_URL`
+  前端站点地址
+
+局域网访问时，这两个地址应改成真实服务器地址。
+
+## Windows
+
+### 1. 初始化数据库
+
 ```powershell
-.\pocketbase_bin\pocketbase.exe --dir pb_data admin create admin@example.com Admin123!
+cd F:\workspace\codextest\blogByCodex
+Remove-Item .\pb_data\* -Recurse -Force
+.\pocketbase.exe migrate up --dir=.\pb_data
 ```
 
-3) **前端启动**
+### 2. 启动 PocketBase
+
+```powershell
+.\pocketbase.exe serve --http=0.0.0.0:8090 --dir=.\pb_data
+```
+
+### 3. 创建超级管理员
+
+```powershell
+.\pocketbase.exe --dir pb_data admin create admin@example.com Admin123!
+```
+
+### 4. 启动前端
+
 ```powershell
 cd web
-# 如需自定义后端地址可自建并修改 VITE_PB_URL
-copy .env.example .env  
-npm install               
+npm install
 npm run dev
 ```
-浏览器访问 http://127.0.0.1:5173 或者 http://<本地ip>:5173
 
-4) **导入示例数据（可选）**
-确保 PocketBase 服务已启动且管理员账号与下方环境变量一致：
-```powershell
-cd web
-$env:PB_URL="http://127.0.0.1:8090"
-$env:PB_ADMIN_EMAIL="admin@example.com"
-$env:PB_ADMIN_PASSWORD="Admin123!"
-npm run seed
+## Linux
+
+### 全新初始化
+
+```bash
+cd blogByCodex
+rm -rf ./pb_data/*
+./pocketbase migrate up --dir=./pb_data
+./pocketbase serve --http=0.0.0.0:8090 --dir=./pb_data
+./pocketbase --dir pb_data admin create admin@example.com Admin123!
 ```
-前台登录/注册基于 `users` 集合，管理员账号仅用于 PocketBase 控制台。
 
-5) **测试**
-```powershell
+```bash
+cd /home/user/workspace/blogByCodex/web
+npm install
+npm run dev
+```
+
+### 从 Windows 迁移到 Linux
+
+只需要：
+
+1. 复制整个项目目录
+2. 保留原有 `pb_data/`
+3. 换成 Linux 版 PocketBase 可执行文件
+4. 直接启动
+
+示例：
+
+```bash
+cd /home/user/workspace/blogByCodex
+./pocketbase serve --http=0.0.0.0:8090 --dir=./pb_data
+```
+
+```bash
+cd /home/user/workspace/blogByCodex/web
+npm install
+npm run dev
+```
+
+## 常用命令
+
+### 前端
+
+```bash
 cd web
+npm run dev
+npm run build
+npm run lint
 npm run test:run
 ```
 
-## 新增功能
-- 头像上传：前台登录后访问 `/profile` 上传头像（`users.avatar` 文件字段）。
-- 文章插图：写作页支持上传多张插图（`posts.attachments` 文件字段），正文可插入这些图片的 URL。
-- 新标签：在 PocketBase 控制台进入 `tags` 集合，新建记录（name/slug/color），前台会自动拉取。
+### 生成示例数据
 
-## 数据模型摘要
-- **posts**：标题、slug、摘要、正文(editor)、封面(file)、标签(relation 多选)、状态(draft/published/archived)、发布时间、阅读时长、作者(relation users)；slug 唯一。
-- **tags**：name、slug 唯一，带可选 color。
-- **comments**：内容、文章(relation posts)、作者(relation users)、状态(visible/hidden)。
-- 访问规则：文章仅 published 对未登录可见；创建/更新需登录且作者本人；评论需登录，自己的评论可删改。
+```bash
+cd web
+$PB_URL="http://127.0.0.1:8090" \
+$PB_ADMIN_EMAIL="admin@example.com" \
+$PB_ADMIN_PASSWORD="Admin123!" \
+npm run seed
+```
 
-## UI/交互
-- 首页：标签过滤、卡片栅格、渐变 Hero。
-- 文章页：封面、正文渲染、标签、评论区（登录后可发）。
-- 控制台：简洁写作表单（标题/slug/摘要/正文/封面/状态/标签/发布时间）。
+## 当前约束
 
-## 其他
-- 环境变量：前端读取 `VITE_PB_URL`（默认 http://127.0.0.1:8090）。
-- PocketBase 版本建议与客户端 SDK 一致（本项目使用 0.22.x 系列）。
+- 正文中的项目内图片不会在数据库里存绝对地址
+- 分享页公开链接优先使用 `VITE_APP_URL`
+- 搜索支持中文输入法
+- 内容搜索会先去掉 HTML 标签，再按正文可见文字匹配
 
-## 页面示例
+## 页面示意
+
 ![](./pic1.png)
+
+![](./pic2.png)
+
+![](./pic3.png)
+
+![](./pic4.png)
+
+![](./pic5.png)

@@ -45,6 +45,18 @@ export interface AuthUser extends RecordModel {
   profileAvatar?: string
 }
 
+export interface ShareRecord extends RecordModel {
+  owner: string
+  shareSlug: string
+  title?: string
+  description?: string
+  posts?: string[]
+  active?: boolean
+  expand?: {
+    owner?: AuthUser
+  }
+}
+
 export interface PostFormInput {
   title: string
   slug: string

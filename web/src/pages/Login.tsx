@@ -3,20 +3,20 @@ import { LogIn } from 'lucide-react'
 import type { FormEvent } from 'react'
 import { useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { useAuth } from '../providers/AuthProvider'
+import { useAuth } from '../providers/auth-context'
 
 const Login = () => {
   const { login } = useAuth()
   const navigate = useNavigate()
   const [params] = useSearchParams()
-  const [email, setEmail] = useState('')
+  const [identity, setIdentity] = useState('')
   const [password, setPassword] = useState('')
 
   const redirectTo = params.get('redirect') ?? '/'
 
   const { mutateAsync, isPending, error } = useMutation({
     mutationFn: async () => {
-      await login(email, password)
+      await login(identity.trim(), password)
       navigate(redirectTo)
     },
   })
@@ -34,13 +34,14 @@ const Login = () => {
           <h2>登录后台</h2>
         </div>
         <label>
-          邮箱
+          邮箱或用户名
           <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            type="text"
+            value={identity}
+            onChange={(e) => setIdentity(e.target.value)}
             required
-            placeholder="you@example.com"
+            autoComplete="username"
+            placeholder="you@example.com / username"
           />
         </label>
         <label>

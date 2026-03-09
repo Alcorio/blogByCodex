@@ -1,17 +1,22 @@
 import { useQuery } from '@tanstack/react-query'
 import { Loader2, Search } from 'lucide-react'
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { fetchPosts, fetchTags } from '../api/posts'
 import { pb } from '../lib/pocketbase'
+import { stripHtmlToText } from '../lib/utils'
 import PostCard from '../components/PostCard'
+import SearchParamInput from '../components/SearchParamInput'
 import TagPill from '../components/TagPill'
 
 const Posts = () => {
-  const [tag, setTag] = useState<string | undefined>()
-  const [keyword, setKeyword] = useState('')
-  const [sortOrder, setSortOrder] = useState<'newest' | 'oldest'>('newest')
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tag = searchParams.get('tag') || undefined
+  const keyword = searchParams.get('q') || ''
+  const authorKeyword = searchParams.get('author') || ''
+  const sortOrder = (searchParams.get('sort') as 'newest' | 'oldest') || 'newest'
+  const dateFrom = searchParams.get('from') || ''
+  const dateTo = searchParams.get('to') || ''
   const gridRef = useRef<HTMLDivElement | null>(null)
   const [gridMinHeight, setGridMinHeight] = useState<number>(260)
 
@@ -39,8 +44,16 @@ const Posts = () => {
           !(
             p.title.toLowerCase().includes(lower) ||
             (p.excerpt ?? '').toLowerCase().includes(lower) ||
-            (p.content ?? '').toLowerCase().includes(lower)
+            stripHtmlToText(p.content).toLowerCase().includes(lower)
           )
+        ) {
+          return false
+        }
+        if (
+          authorKeyword.trim() &&
+          !`${p.expand?.author?.username ?? ''} ${p.expand?.author?.email ?? ''}`
+            .toLowerCase()
+            .includes(authorKeyword.toLowerCase())
         ) {
           return false
         }
@@ -55,7 +68,7 @@ const Posts = () => {
         return sortOrder === 'newest' ? db - da : da - db
       })
     return result
-  }, [keyword, posts, sortOrder, dateFrom, dateTo])
+  }, [authorKeyword, keyword, posts, sortOrder, dateFrom, dateTo])
 
   useLayoutEffect(() => {
     // Capture a reasonable baseline height so empty results don't yank the page layout.
@@ -65,6 +78,49 @@ const Posts = () => {
     const clamped = Math.max(260, Math.min(rect.height, viewportCap))
     setGridMinHeight(clamped)
   }, [gridMinHeight, posts])
+
+  const updateFilters = (next: {
+    tag?: string
+    keyword?: string
+    authorKeyword?: string
+    sort?: 'newest' | 'oldest'
+    from?: string
+    to?: string
+  }) => {
+    const params = new URLSearchParams(searchParams)
+
+    if (next.tag !== undefined) {
+      if (next.tag) params.set('tag', next.tag)
+      else params.delete('tag')
+    }
+
+    if (next.keyword !== undefined) {
+      if (next.keyword.trim()) params.set('q', next.keyword)
+      else params.delete('q')
+    }
+
+    if (next.authorKeyword !== undefined) {
+      if (next.authorKeyword.trim()) params.set('author', next.authorKeyword)
+      else params.delete('author')
+    }
+
+    if (next.sort !== undefined) {
+      if (next.sort === 'newest') params.delete('sort')
+      else params.set('sort', next.sort)
+    }
+
+    if (next.from !== undefined) {
+      if (next.from) params.set('from', next.from)
+      else params.delete('from')
+    }
+
+    if (next.to !== undefined) {
+      if (next.to) params.set('to', next.to)
+      else params.delete('to')
+    }
+
+    setSearchParams(params, { replace: true })
+  }
 
   return (
     <section className="container stack" style={{ paddingTop: '2rem', paddingBottom: '3rem' }}>
@@ -80,7 +136,7 @@ const Posts = () => {
         <button
           type="button"
           className={!tag ? 'tag-pill active' : 'tag-pill'}
-          onClick={() => setTag(undefined)}
+          onClick={() => updateFilters({ tag: '' })}
         >
           全部
         </button>
@@ -89,16 +145,25 @@ const Posts = () => {
             key={t.id}
             tag={t}
             active={t.slug === tag}
-            onClick={(slug) => setTag(slug)}
+            onClick={(slug) => updateFilters({ tag: slug })}
           />
         ))}
         <div className="search-box">
           <Search size={16} />
-          <input
-            type="search"
+          <SearchParamInput
+            key={keyword}
             placeholder="搜索标题或内容"
-            value={keyword}
-            onChange={(e) => setKeyword(e.target.value)}
+            initialValue={keyword}
+            onCommit={(next) => updateFilters({ keyword: next })}
+          />
+        </div>
+        <div className="search-box">
+          <Search size={16} />
+          <SearchParamInput
+            key={authorKeyword}
+            placeholder="搜索作者"
+            initialValue={authorKeyword}
+            onCommit={(next) => updateFilters({ authorKeyword: next })}
           />
         </div>
       </div>
@@ -109,7 +174,7 @@ const Posts = () => {
           <select
             className="chip-input"
             value={sortOrder}
-            onChange={(e) => setSortOrder(e.target.value as any)}
+            onChange={(e) => updateFilters({ sort: e.target.value as 'newest' | 'oldest' })}
           >
             <option value="newest">最新</option>
             <option value="oldest">最早</option>
@@ -121,7 +186,7 @@ const Posts = () => {
             className="chip-input"
             type="date"
             value={dateFrom}
-            onChange={(e) => setDateFrom(e.target.value)}
+            onChange={(e) => updateFilters({ from: e.target.value })}
           />
         </div>
         <div className="filter-chip">
@@ -130,7 +195,7 @@ const Posts = () => {
             className="chip-input"
             type="date"
             value={dateTo}
-            onChange={(e) => setDateTo(e.target.value)}
+            onChange={(e) => updateFilters({ to: e.target.value })}
           />
         </div>
       </div>

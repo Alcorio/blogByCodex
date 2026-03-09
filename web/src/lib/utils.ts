@@ -85,7 +85,33 @@ export const formatDate = (value?: string | Date | null) => {
   return format(parsed, 'yyyy年MM月dd日')
 }
 
+export const formatDateTime = (value?: string | Date | null) => {
+  if (!value) return ''
+  const parsed = typeof value === 'string' ? parseISO(value) : value
+  return format(parsed, 'yyyy年MM月dd日 HH:mm')
+}
+
 export const estimateReadingMinutes = (content: string, wordsPerMinute = 180) => {
   const words = content.trim().split(/\s+/).filter(Boolean).length
   return Math.max(1, Math.ceil(words / wordsPerMinute))
+}
+
+export const stripHtmlToText = (html?: string) => {
+  if (!html) return ''
+
+  if (typeof DOMParser === 'undefined') {
+    return html
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&amp;/gi, '&')
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/\s+/g, ' ')
+      .trim()
+  }
+
+  const doc = new DOMParser().parseFromString(html, 'text/html')
+  return (doc.body.textContent || '').replace(/\s+/g, ' ').trim()
 }

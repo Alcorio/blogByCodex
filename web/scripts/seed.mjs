@@ -9,16 +9,8 @@ const pb = new PocketBase(baseUrl)
 const log = (message) => console.log(`[seed] ${message}`)
 
 const ensureAdmin = async () => {
-  log(`login admin ${adminEmail}`)
-
-  // SDK 默认走 /_superusers，但 0.22 服务器是 /api/admins，这里手动调用
-  const auth = await pb.send('/api/admins/auth-with-password', {
-    method: 'POST',
-    body: { identity: adminEmail, password: adminPassword },
-  })
-
-  // 将 token 写入 authStore，后续请求自动带上
-  pb.authStore.save(auth.token, auth.admin)
+  log(`login superuser ${adminEmail}`)
+  await pb.collection('_superusers').authWithPassword(adminEmail, adminPassword)
 }
 
 const findOrCreate = async (collection, filter, data) => {

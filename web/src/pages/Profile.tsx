@@ -3,7 +3,7 @@ import { Loader2, Upload } from 'lucide-react'
 import type { FormEvent } from 'react'
 import { useState } from 'react'
 import { getFileUrl, pb } from '../lib/pocketbase'
-import { useAuth } from '../providers/AuthProvider'
+import { useAuth } from '../providers/auth-context'
 
 const Profile = () => {
   const { user } = useAuth()

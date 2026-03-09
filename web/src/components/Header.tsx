@@ -1,13 +1,15 @@
-import { LogIn, LogOut, PenSquare, ChevronDown } from 'lucide-react'
+import { LogIn, LogOut, PenSquare, ChevronDown, Moon, Sun } from 'lucide-react'
 import { useLocation, useNavigate, Link } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
-import { useAuth } from '../providers/AuthProvider'
+import { useAuth } from '../providers/auth-context'
+import { useTheme } from '../providers/theme-context'
 import { getFileUrl } from '../lib/pocketbase'
 
 const Header = () => {
   const { pathname } = useLocation()
   const navigate = useNavigate()
   const { user, logout } = useAuth()
+  const { theme, toggleTheme } = useTheme()
   const [open, setOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement | null>(null)
 
@@ -59,8 +61,23 @@ const Header = () => {
           >
             我的文章
           </Link>
+          <Link
+            className={pathname === '/share-center' ? 'nav-link active' : 'nav-link'}
+            to="/share-center"
+          >
+            分享页
+          </Link>
         </nav>
         <div className="nav-actions">
+          <button
+            className="ghost-btn theme-toggle"
+            type="button"
+            onClick={toggleTheme}
+            aria-label={theme === 'dark' ? '切换到亮色主题' : '切换到暗色主题'}
+            title={theme === 'dark' ? '亮色模式' : '暗色模式'}
+          >
+            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
           <button
             className="ghost-btn"
             type="button"
